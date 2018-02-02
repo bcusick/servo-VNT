@@ -8,12 +8,7 @@
 
 */
 
-#include <avr/pgmspace.h>
-#include <EEPROM.h>
-#include <Wire.h>
-#include <SoftwareSerial.h>
-#include <SPI.h>
-#include <MAX31855.h>    // Use library written for a faster read time - https://github.com/engineertype/MAX31855
+
 #include <ResponsiveAnalogRead.h>
 #include <PID_v1.h>
 #include <servoCont.h>
@@ -28,29 +23,10 @@
 
 #define PIN_RPM_TRIGGER 2
 #define PIN_VNT_N75 11
-#define PIN_AUX_N75 3
-
-
-
-// Pins for the EGT MAX31855
-#define doPin 4
-#define csPin 5
-#define clPin 6
 
 ResponsiveAnalogRead map_read(PIN_MAP, false);  // no sleep on the MAP read; need the resolution
 ResponsiveAnalogRead tps_read(PIN_TPS, true);
 ResponsiveAnalogRead rpm_read(0, true);
-
-// Set up the LCD pin
-SoftwareSerial lcd = SoftwareSerial(0, PIN_LCD);
-
-// Set up the thermocouple pins (Adafruit MAX31855 thermocouple interface)
-MAX31855 temp(doPin, csPin, clPin );
-
-#define EGT_COOL 165
-#define EGT_WARN 700
-#define EGT_ALARM 775
-#define EGT_MAX_READ 1101
 
 #define IDLE_MAX_RPM 1150
 #define MIN_BOOST_SPOOLED 10 // kPa
@@ -191,8 +167,6 @@ struct settingsStruct {
   int tpsMax;
   int mapMin;
   int mapMax;
-  int egtMin;
-  int egtMax;
   int empMin;
   int empMax;
   int rpmMax;
@@ -209,43 +183,43 @@ settingsStruct settings;
 //  contains calculated output data. calculated each run of mainloop
 struct controlsStruct {
   // inputs
-  volatile int tpsInput;
-  unsigned char tpsCorrected;
-  volatile int mapInput;
-  double mapCorrected;
-  volatile int egtInput;
-  unsigned char egtCorrected;
-  volatile int empInput;
-  unsigned char empCorrected;
-  char mode; // operating mode
+  volatile int    tpsInput;
+  unsigned char   tpsCorrected;
+  volatile int    mapInput;
+  double          mapCorrected;
+  volatile int    egtInput;
+  unsigned char   egtCorrected;
+  volatile int    empInput;
+  unsigned char   empCorrected;
+  char            mode; // operating mode
 
   // outputs
 
-  double vntTargetPressure;
-  unsigned char vntPositionRemapped;
-  unsigned char vntPositionDC;
-  int vntMinDc;
-  int vntMaxDc;
-  int n75precontrol;
+  double          vntTargetPressure;
+  unsigned char   vntPositionRemapped;
+  unsigned char   vntPositionDC;
+  int             vntMinDc;
+  int             vntMaxDc;
+  int             n75precontrol;
 
   // calculated value
-  volatile int rpmActual;
-  volatile unsigned char rpmCorrected;
-  unsigned char statusBits;
+  volatile int            rpmActual;
+  volatile unsigned char  rpmCorrected;
+  unsigned char           statusBits;
 
-  bool idling;
-  int temp1;
+  bool            idling;
+  int             temp1;
 
-  unsigned char auxOutput;
+  unsigned char   auxOutput;
 
-  float boostCalculatedP;
-  float boostCalculatedI;
-  float boostCalculatedD;
+  float           boostCalculatedP;
+  float           boostCalculatedI;
+  float           boostCalculatedD;
 
-  double pidOutput;
+  double          pidOutput;
 
-  unsigned long lastTime;
-  float lastInput;
+  unsigned long   lastTime;
+  float           lastInput;
 };
 
 controlsStruct controls;
@@ -259,8 +233,8 @@ double Kd;
 PID vntPid(&controls.mapCorrected, &controls.pidOutput, &controls.vntTargetPressure, Kp, Ki, Kd, P_ON_E,DIRECT);
 
 struct avgStruct {
-  unsigned char pos;
-  unsigned char size;
+  unsigned char         pos;
+  unsigned char         size;
   volatile unsigned int avgData[AVG_MAX];
 };
 
@@ -268,34 +242,6 @@ avgStruct mapAvg;
 
 char buffer[100]; // general purpose buffer, mainly used for string storage when printing from flash
 unsigned long lastPacketTime;
-const unsigned char mapVisualitionHelp[] PROGMEM  = "Top Left is 0,0 (press: L - toggle live mode)";
-
-unsigned char page = 0;
-const char *pages[] = {
-  "About", "Adaptation", "Actuator Fine-tune", "Edit map: boostRequest", "Edit map: boostDCMin", "Edit map: boostDCMax", "Edit map: n75preControl", "Edit map: Aux. device PWM map", "Output Tests"
-};
-
-unsigned char *editorMaps[] = {
-  boostRequest, boostDCMin, boostDCMax, n75precontrolMap, auxMap
-};
-
-unsigned char clearScreen[] =  {
-  27, '[', '2', 'J', 27, '[', 'H'
-};
-
-const unsigned char ANSIclearEol[] PROGMEM = {
-  27, '[', 'K', 0
-};
-
-const unsigned char ANSIclearEolAndLf[] PROGMEM = {
-  27, '[', 'K', '\r', '\n', 0
-};
-const unsigned char ANSIgoHome[] PROGMEM = {
-  27, '[', '1', ';', '1', 'H', 0
-};
-const unsigned char ANSIclearEos[] PROGMEM = {
-  27, '[', 'J', 0
-};
 
 void setPwmFrequency(int pin, int divisor) {
   byte mode;
@@ -537,181 +483,14 @@ unsigned char mapLookUp(unsigned char *mapData, unsigned char x, unsigned char y
 }
 
 
-char mapDebugCharValue(unsigned char c) {
-  if (c < 5) {
-    return ' ';
-  }
-  else if (c < 20) {
-    return '.';
-  }
-  else if (c < 60) {
-    return ':';
-  }
-  else if (c < 128) {
-    return '!';
-  }
-  else if (c < 180) {
-    return 'o';
-  }
-  else if (c < 220) {
-    return 'O';
-  }
-  else  {
-    return '@';
-  }
-}
-
-
-// Fetches and print string from flash to preserve some ram!
-void printFromFlash(const unsigned char *str) {
-  strcpy_P(buffer, (PGM_P)str);
-  Serial.print(buffer);
-}
-
-int EEPROMwriteData(int offset, byte *ptr, int size) {
-  int i;
-  for (i = 0; i < size; i++)
-    EEPROM.write(offset++, *(ptr++));
-  return i;
-}
-
-int EEPROMreadData(int offset, byte *ptr, int size) {
-  int i;
-  for (i = 0; i < size; i++)
-    *(ptr++) = EEPROM.read(offset++);
-  return i;
-}
-
-void saveToEEPROM() {
-  int ofs = 0;
-  // write magic header
-  strcpy_P(buffer, (PGM_P)&versionString);
-  ofs += EEPROMwriteData(0, (byte*)&buffer, strlen(buffer));
-  // write control struct
-  ofs += EEPROMwriteData(ofs, (byte*)&settings, sizeof(settingsStruct));
-
-  ofs += EEPROMwriteData(ofs, (byte*)&auxMap, sizeof(auxMap));
-  ofs += EEPROMwriteData(ofs, (byte*)&boostRequest, sizeof(boostRequest));
-  ofs += EEPROMwriteData(ofs, (byte*)&boostDCMin, sizeof(boostDCMin));
-  ofs += EEPROMwriteData(ofs, (byte*)&boostDCMax, sizeof(boostDCMax));
-  ofs += EEPROMwriteData(ofs, (byte*)&n75precontrolMap, sizeof(n75precontrolMap));
-
-  printFromFlash(ANSIclearEolAndLf);
-  Serial.print(ofs, DEC);
-  Serial.print(F("SAVED "));
-  Serial.print(ofs);
-  Serial.print(F(" BYTES."));
-
-  delay(1000);
-}
-
-bool loadFromEEPROM(bool force) {
-  int ofs = 0;
-  // if reset pin is active, no not load anything from eeprom
-  if (digitalRead(PIN_BUTTON) == 0) {
-    Serial.print(F("PIN_BUTTON active.."));
-    delay(2000);
-    return false;
-  }
-  // Check magic header to prevent data corruption of blank board or wrong version save file
-  if (!force) {
-    strcpy_P(buffer, (PGM_P)&versionString);
-    for (ofs = 0; ofs < strlen(buffer); ofs++) {
-      if (EEPROM.read(ofs) != buffer[ofs])
-        return false;
-    }
-  }
-  ofs = strlen(buffer);
-  ofs += EEPROMreadData(ofs, (byte*)&settings, sizeof(settingsStruct));
-
-  ofs += EEPROMreadData(ofs, (byte*)&auxMap, sizeof(auxMap));
-  ofs += EEPROMreadData(ofs, (byte*)&boostRequest, sizeof(boostRequest));
-  ofs += EEPROMreadData(ofs, (byte*)&boostDCMin, sizeof(boostDCMin));
-  ofs += EEPROMreadData(ofs, (byte*)&boostDCMax, sizeof(boostDCMax));
-  ofs += EEPROMreadData(ofs, (byte*)&n75precontrolMap, sizeof(n75precontrolMap));
-
-  return true;
-}
-
-
-int toKpaMAP(int raw) {
-  return raw * MAP_SCALING_KPA;
-}
-
-int toKpaEMP(int raw) {
-  return raw * EMP_SCALING_KPA;
-}
-
-int toRpm(int raw) {
-  return round(((float)settings.rpmMax / 255) * (float)raw);
-}
-
-int toEgt(int raw) {
-  return round(((float)settings.egtMax / 255) * (float)raw);
-}
-
-int toTps(int raw) {
-  // percent
-  return int(raw / 2.55);
-}
-
-int getFilteredAverage(struct avgStruct *a) {
-  int minVal = 0;
-  int maxVal = 255;
-  long int avgAll = 0;
-
-  for (int i = 0; i < a->size; i++) {
-
-    if (a->avgData[i] < minVal) {
-      minVal = a->avgData[i];
-    }
-    if (a->avgData[i] > maxVal) {
-      maxVal = a->avgData[i];
-    }
-
-    avgAll += a->avgData[i];
-  }
-  avgAll = (int)(avgAll / a->size);
-  return avgAll;
-
-}
-
 void readValuesTps() {
   tps_read.update();
   controls.tpsInput = tps_read.getValue();
 }
 
 void readValuesMap() {
-
-  mapAvg.pos++;
-  if (mapAvg.pos >= mapAvg.size)
-    mapAvg.pos = 0;
-
   map_read.update();
-  mapAvg.avgData[mapAvg.pos] = map_read.getValue();
-
-  controls.mapInput = getFilteredAverage(&mapAvg);
-
-}
-
-void readValuesEgt() {
-  int egtread;
-
-  egtread = temp.readThermocouple(CELSIUS);
-
-  if (egtread <= 0) {
-    controls.temp1 = 0;
-  }
-  else if (egtread >= 10000) {        // MAX31855 library returns > 10000 when there was a problem reading
-    controls.temp1 = controls.temp1;
-  }
-  else if (egtread >= settings.egtMax) {
-    controls.temp1 = settings.egtMax;
-  }
-  else {
-    controls.temp1 = egtread;
-  }
-
+  controls.mapInput = map_read.getValue();
 }
 
 void determineIdle() {
@@ -840,22 +619,13 @@ void controlVNT() {
   controls.lastTime = millis();
 }
 
-void controlEGT() {
-  // EGT controls
-  controls.egtCorrected = mapValues(controls.temp1, settings.egtMin, settings.egtMax);
-  controls.auxOutput = mapLookUp(auxMap, controls.rpmCorrected, controls.egtCorrected);
-}
+
 
 void updateOutputValues() {
   // PWM output pins
   analogWrite(PIN_VNT_N75, controls.vntPositionRemapped);
   analogWrite(PIN_AUX_N75, controls.auxOutput);
 }
-
-
-
-
-
 
 bool freezeModeEnabled = false;
 
@@ -888,7 +658,6 @@ void loop() {
     calcRpm();
     determineIdle();
     controlVNT();
-    controlEGT();
     updateOutputValues();
 
     execLoop = millis();
