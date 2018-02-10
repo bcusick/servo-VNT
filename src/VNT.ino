@@ -32,11 +32,10 @@ ResponsiveAnalogRead rpm_read(0, true);
 #define MIN_BOOST_SPOOLED 10 // kPa
 #define PID_CUT_IN 1520 // rpm
 #define TPS_CUT_IN 18 // ~ 7%
+#define MAP_MAX 300 // kpa, or 3bar sensor
 
 
-/* Scaling factor for your sensors - 255 divided by this should equal the full scale deflection of your sensor */
-#define MAP_SCALING_KPA 0.977
-#define EMP_SCALING_KPA 1.953
+
 
 /* Change this if you need to adjust the scaling of the PID outputs - ie if you need finer control at smaller fractional numbers increase this
   or if you need to have large multipliers then decrease this */
@@ -72,7 +71,7 @@ ResponsiveAnalogRead rpm_read(0, true);
   data[xsize,ysize],
   lastX,lastY,lastRet // automatically filled when used mapLookup
 */
-
+/*
 unsigned char auxMap[] = {
   'M', '2', 'D',
   0x6, 0x8, MAP_AXIS_RPM, MAP_AXIS_EGT, MAP_AXIS_DUTY_CYCLE, // 01 - new version
@@ -86,11 +85,11 @@ unsigned char auxMap[] = {
   210, 210, 210, 210, 210, 210,
   00, 00, 00,                // lastX,lastY,lastRet
 };
-
+*/
 
 unsigned char boostRequest[] = {
   'M', '2', 'D',
-  0xC, 0xB, MAP_AXIS_RPM, MAP_AXIS_TPS, MAP_AXIS_KPA, // 01 - new version
+  0xC, 0xB, MAP_AXIS_RPM, MAP_AXIS_TPS, MAP_AXIS_KPA, // Table values are kPa
   0, 0, 0, 15,  34, 44, 46, 46, 46, 43, 39, 37,
   0, 5, 15, 27, 38, 49, 51, 51, 51, 48, 43, 41,
   0, 5, 20, 32, 42, 54, 57, 57, 57, 53, 48, 45,
@@ -107,7 +106,7 @@ unsigned char boostRequest[] = {
 
 unsigned char boostDCMax[] = {
   'M', '2', 'D',
-  0x8, 0xB, MAP_AXIS_RPM, MAP_AXIS_TPS, MAP_AXIS_DUTY_CYCLE,
+  0x8, 0xB, MAP_AXIS_RPM, MAP_AXIS_TPS, MAP_AXIS_DUTY_CYCLE, // Table values are Duty Cycle
   0, 204, 204, 180, 155, 140, 120, 70,
   0, 204, 204, 180, 155, 140, 120, 70,
   0, 204, 204, 175, 155, 140, 120, 70,
@@ -124,7 +123,7 @@ unsigned char boostDCMax[] = {
 
 unsigned char boostDCMin[] = {
   'M', '2', 'D',
-  0x9, 0xB, MAP_AXIS_RPM, MAP_AXIS_TPS, MAP_AXIS_DUTY_CYCLE,
+  0x9, 0xB, MAP_AXIS_RPM, MAP_AXIS_TPS, MAP_AXIS_DUTY_CYCLE, // Table values are Duty Cycle
   0, 50, 50, 50, 50, 50, 50, 50, 50,
   0, 121, 110, 100, 91, 83, 75, 68, 50,
   0, 121, 110, 100, 91, 83, 75, 68, 50,
@@ -141,7 +140,7 @@ unsigned char boostDCMin[] = {
 
 unsigned char n75precontrolMap[] = {
   'M', '2', 'D',
-  0xC, 0xB, MAP_AXIS_RPM, MAP_AXIS_TPS, MAP_AXIS_DUTY_CYCLE,
+  0xC, 0xB, MAP_AXIS_RPM, MAP_AXIS_TPS, MAP_AXIS_DUTY_CYCLE, // Table values are Duty Cycle
   0, 90, 90, 110, 110, 100, 90, 75, 62, 50, 50, 50,
   0, 204, 204, 204, 182, 163, 145, 130, 122, 115, 106, 70,
   0, 204, 204, 198, 165, 148, 137, 126, 118, 112, 102, 70,
@@ -397,10 +396,7 @@ void setup() {
 
   digitalWrite(PIN_HEARTBEAT, LOW);
 
-  // set up screen
-  layoutLCD();
 
-  pageAbout(1); // force output
 }
 
 void loadDefaults() {
@@ -430,9 +426,7 @@ unsigned char mapValues(int raw, int mapMin, int mapMax) {
   return map(raw, mapMin, mapMax, 0, 255);
 }
 
-unsigned char mapValuesSqueeze(int raw, int mapMin, int mapMax) {
-  return map(raw, 0, 255, mapMin, mapMax);
-}
+
 
 unsigned char mapInterpolate(unsigned char p1, unsigned char p2, unsigned char pos) {
   return (p1 * (100 - pos) + p2 * pos) / 100;
@@ -488,10 +482,13 @@ void readValuesTps() {
   controls.tpsInput = tps_read.getValue();
 }
 
+
+
 void readValuesMap() {
   map_read.update();
-  controls.mapInput = map_read.getValue();
+  controls.mapInput = map_read.getValue();  //add conversion to pressure here
 }
+
 
 void determineIdle() {
   if ( controls.tpsCorrected > 0 ) {
@@ -518,7 +515,8 @@ void controlVNT() {
   double toControlVNT;
 
   controls.rpmCorrected = mapValues(controls.rpmActual, 0, settings.rpmMax);
-  controls.mapCorrected = mapValues(controls.mapInput, settings.mapMin, settings.mapMax);
+  //controls.mapCorrected = mapValues(controls.mapInput, settings.mapMin, settings.mapMax); //don't map to 8-bit.
+  controls.mapCorrected = controls.mapInput;  //already converted to pressure, so no re-map
   controls.tpsCorrected = mapValues(controls.tpsInput, settings.tpsMin, settings.tpsMax);
 
   controls.vntMaxDc = mapLookUp(boostDCMax, controls.rpmCorrected, controls.tpsCorrected);
@@ -528,6 +526,9 @@ void controlVNT() {
 
   /* Look up the requested boost */
   controls.vntTargetPressure = mapLookUp(boostRequest, controls.rpmCorrected, controls.tpsCorrected);
+  //convert pressure to sensor duty cycle.
+
+
 
   /* This is the available span of our DC - we can only go between min and max */
   minControl = controls.vntMinDc - controls.n75precontrol;  // this will be a negative number
@@ -623,7 +624,8 @@ void controlVNT() {
 
 void updateOutputValues() {
   // PWM output pins
-  analogWrite(PIN_VNT_N75, controls.vntPositionRemapped);
+  //analogWrite(PIN_VNT_N75, controls.vntPositionRemapped);
+  servoCont(controls.vntPositionRemapped);  //output dutycycle to servo conroller
   analogWrite(PIN_AUX_N75, controls.auxOutput);
 }
 
